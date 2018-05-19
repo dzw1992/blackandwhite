@@ -75,6 +75,7 @@ class DeepQNetwork(object):
         
         w_initializer, b_initializer = tf.random_normal_initializer(0., 0.1), tf.constant_initializer(0.1)
         #
+
         channel=16
         #first conv layer
         x_image=tf.reshape(inputstate,[-1,8,8,1])
