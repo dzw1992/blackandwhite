@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from random import choice
+from env_blackandwhite import BlackAndWhite
 class DeepQNetwork(object):
     def __init__(
             self,
@@ -41,17 +42,23 @@ class DeepQNetwork(object):
                 
         self.target_var_scope = "target_net"
         with tf.variable_scope(self.target_var_scope):
-            self.q_next = -self._create_target_net(inputstate=-self.s_)
+            A=BlackAndWhite(tf.reshape(self.s_,[8,8]))
+            action=self.choose_action(A)
+            state=A.take_action(action,realy=False).reshape([1,-1])
+            self.q_next = self._create_target_net(inputstate=-state)
+        
+        with tf.variable_scope('q_eval'):
+            a_indices = tf.stack([tf.range(tf.shape(self.a)[0], dtype=tf.int32), self.a], axis=1)
+            self.q_eval_wrt_a = tf.gather_nd(params=self.q_eval, indices=a_indices)   
         
         with tf.variable_scope('q_target'):
             q_target = self.r + self.gamma * self.q_next   # shape=(None, )
             self.q_target = tf.stop_gradient(q_target)
         with tf.variable_scope('loss'):
-            self.loss = tf.reduce_mean(tf.squared_difference(self.q_target, self.q_eval, name='TD_error'))
+            self.loss = tf.reduce_mean(tf.squared_difference(self.q_target, self.q_eval_wrt_a, name='TD_error'))
         with tf.variable_scope('train'):
             self._train_op = tf.train.RMSPropOptimizer(self.lr).minimize(self.loss)
             
-        
         t_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.target_var_scope)
         e_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.eval_var_scope)
         with tf.variable_scope('soft_replacement'):
@@ -69,13 +76,12 @@ class DeepQNetwork(object):
         self.s = tf.placeholder(tf.float32, [None, self.n_features], name='s')  # input State
         self.s_ = tf.placeholder(tf.float32, [None, self.n_features], name='s_')  # input Next State
         self.r = tf.placeholder(tf.float32, [None, ], name='r')  # input Reward
-        self.a = tf.placeholder(tf.int32, [None, 2], name='a')  # input Action
+        self.a = tf.placeholder(tf.int32, [None, ], name='a')  # input Action
         
     def _create_eval_net(self,inputstate):
         
         w_initializer, b_initializer = tf.random_normal_initializer(0., 0.1), tf.constant_initializer(0.1)
         #
-
         channel=16
         #first conv layer
         x_image=tf.reshape(inputstate,[-1,8,8,1])
@@ -101,12 +107,7 @@ class DeepQNetwork(object):
                               bias_initializer=b_initializer, 
                               name='hidden_layer2')
         
-#        a3=tf.layers.dense(a2,units=50, 
-#                              activation=tf.nn.relu, kernel_initializer=w_initializer,
-#                              bias_initializer=b_initializer, 
-#                              name='hidden_layer3')
-        
-        value=tf.layers.dense(a2,units=1, 
+        value=tf.layers.dense(a2,units=64, 
                               activation=tf.nn.tanh, kernel_initializer=w_initializer,
                               bias_initializer=b_initializer, 
                               name='evaluation')
@@ -131,14 +132,13 @@ class DeepQNetwork(object):
         self.memory_counter += 1
         
     def choose_action(self, chess):
-        actionspace=chess.find_action_space()
-        actions_value_space=np.zeros(len(actionspace))
+        actionspace=np.array(chess.find_action_space())
+        print(chess.chessBoard)
+        space_flatten=actionspace[:,0]*8+actionspace[:,1]
         if np.random.uniform() < self.epsilon:
-            for i in range(len(actionspace)):
-                state=chess.take_action(actionspace[i],realy=False).reshape([1,-1])
-            # forward feed the observation and get q value for every actions
-                actions_value_space[i]=(1-self.sess.run(self.q_eval, feed_dict={self.s: -state}))
-            action = actionspace[np.argmax(actions_value_space)]
+            values=self.sess.run(self.q_eval, feed_dict={self.s:chess.chessBoard})
+            action_flattern=space_flatten[np.argmax(values[space_flatten])]
+            action = [int(action_flattern/8),action_flattern%8]
         else:
             action = choice(actionspace)
         return action
